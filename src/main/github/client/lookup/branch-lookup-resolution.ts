@@ -5,10 +5,7 @@ import {
   type MergedPRCommitMembership
 } from '../../merged-pr-commit-membership'
 import { shouldHideNonOpenReviewOnDefaultBranch } from '../../../source-control/repo-default-branch'
-import {
-  getGitHubApiRepositoryForRemote,
-  resolveGitHubApiRepositoryCandidates
-} from '../../github-api-repository'
+import { resolveGitHubApiRepositoryCandidates } from '../../github-api-repository'
 import { exactRepositoryCandidates } from '../pull-request-lookup-candidates'
 import { mapPRState } from '../../mappers'
 import { ownerRepoFromPullRequestUrl } from './../github-exec-scope'
@@ -26,8 +23,7 @@ import { lookupPRByBranchName } from './pr-branch-lookup'
 import { lookupPRByNumber } from './pr-number-lookup'
 import { derivePRRefreshData } from './branch-lookup-derived-data'
 import { assemblePRRefreshFoundOutcome } from './pr-refresh-outcome-assembly'
-import { shouldRetryTrackedUpstreamBranch } from './tracked-upstream-cache'
-import { getTrackedUpstreamBranch } from './tracked-upstream-branch'
+import { branchHeadKey, getConfiguredPushHead, getTrackedUpstreamHead } from './branch-review-heads'
 import {
   createImplicitDefaultBranchPRPolicy,
   type ImplicitDefaultBranchPRContext
@@ -76,7 +72,7 @@ export async function resolvePRForBranchOutcome(input: {
   let usedExactNumberLookup = false
   const defaultBranchPRContext: ImplicitDefaultBranchPRContext = {
     originHeadRepo: headRepo,
-    trackedUpstream: null,
+    secondaryHeads: [],
     branchName,
     linkedPRNumber,
     repoPath,
@@ -160,49 +156,37 @@ export async function resolvePRForBranchOutcome(input: {
       pendingBranchLookupError = branchLookup.pendingError
       hasPendingBranchLookupError = true
     }
-    if (!data) {
-      // Tracked upstream disambiguates head branch and fork owner beyond local branch names.
-      const upstreamBranch = await getTrackedUpstreamBranch(
-        repoPath,
-        branchName,
-        connectionId,
-        localGitOptions
-      )
-      if (upstreamBranch) {
-        const upstreamHeadRepo =
-          (await getGitHubApiRepositoryForRemote(
-            repoPath,
-            upstreamBranch.remoteName,
-            connectionId,
-            localGitOptions
-          )) ?? headRepo
-        if (
-          upstreamHeadRepo &&
-          shouldRetryTrackedUpstreamBranch(upstreamBranch, branchName, upstreamHeadRepo, headRepo)
-        ) {
-          defaultBranchPRContext.trackedUpstream = {
-            branch: upstreamBranch,
-            headRepo: upstreamHeadRepo
-          }
-          const upstreamLookup = await lookupPRByBranchName({
-            candidates,
-            headRepo: upstreamHeadRepo,
-            branchName: upstreamBranch.branchName,
-            ghOptions,
-            executionScope,
-            policy: implicitPRPolicy,
-            reads
-          })
-          data = upstreamLookup.data
-          dataRepo = upstreamLookup.dataRepo
-          if (!hasPendingBranchLookupError && 'pendingError' in upstreamLookup) {
-            pendingBranchLookupError = upstreamLookup.pendingError
-            hasPendingBranchLookupError = true
-          }
-          if (data) {
-            dataHeadRepo = upstreamHeadRepo
-          }
-        }
+    // Tracked upstream, then the configured push head, disambiguate head branch and fork owner.
+    const triedHeads = new Set(headRepo ? [branchHeadKey(headRepo, branchName)] : [])
+    const secondaryHeads = [
+      () => getTrackedUpstreamHead(repoPath, branchName, connectionId, localGitOptions, headRepo),
+      () => getConfiguredPushHead(repoPath, branchName, connectionId, localGitOptions)
+    ]
+    for (const resolveHead of secondaryHeads) {
+      const head = data ? null : await resolveHead()
+      const key = head ? branchHeadKey(head.headRepo, head.branch.branchName) : null
+      if (!head || !key || triedHeads.has(key)) {
+        continue
+      }
+      triedHeads.add(key)
+      defaultBranchPRContext.secondaryHeads.push(head)
+      const headLookup = await lookupPRByBranchName({
+        candidates,
+        headRepo: head.headRepo,
+        branchName: head.branch.branchName,
+        ghOptions,
+        executionScope,
+        policy: implicitPRPolicy,
+        reads
+      })
+      data = headLookup.data
+      dataRepo = headLookup.dataRepo
+      if (!hasPendingBranchLookupError && 'pendingError' in headLookup) {
+        pendingBranchLookupError = headLookup.pendingError
+        hasPendingBranchLookupError = true
+      }
+      if (data) {
+        dataHeadRepo = head.headRepo
       }
     }
   }

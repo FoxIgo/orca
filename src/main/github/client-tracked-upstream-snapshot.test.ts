@@ -2,6 +2,7 @@ import type * as GitExecFileModule from '../git/command-runner/git-exec-file'
 import type * as GhExecFileModule from '../git/command-runner/gh-exec-file'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as GithubApiRepositoryModule from './github-api-repository'
+import type * as BranchReviewHeadsModule from './client/lookup/branch-review-heads'
 import type * as GitHubEnterpriseRepositoryModule from './github-enterprise-repository'
 
 const { clientMocks, moduleMocks } = await vi.hoisted(async () => {
@@ -29,6 +30,11 @@ vi.mock('./github-enterprise-repository', async (importOriginal) =>
     await importOriginal<typeof GitHubEnterpriseRepositoryModule>()
   )
 )
+// These cases count upstream snapshot probes; the push-head read after a miss has its own suite.
+vi.mock('./client/lookup/branch-review-heads', async (importOriginal) => ({
+  ...(await importOriginal<typeof BranchReviewHeadsModule>()),
+  getConfiguredPushHead: async () => null
+}))
 vi.mock('./rate-limit', () => moduleMocks.rateLimitModuleMock(clientMocks))
 vi.mock('./github-api-repository', async (importOriginal) =>
   moduleMocks.githubApiRepositoryModuleMock(
