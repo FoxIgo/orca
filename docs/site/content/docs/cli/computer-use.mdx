@@ -65,6 +65,7 @@ App names work when unambiguous (`--app Spotify`). Use `--app pid:<number>` only
 orca computer click --app <app> --element-index <i> --json
 orca computer set-value --app <app> --element-index <i> --value "text" --json
 orca computer type-text --app <app> --text "text" --json
+orca computer type-text --app <app> --element-index <i> --text "text" --json
 orca computer press-key --app <app> --key Return --json
 orca computer hotkey --app <app> --key CmdOrCtrl+A --json
 orca computer paste-text --app <app> --text "text" --json
@@ -74,6 +75,8 @@ orca computer perform-secondary-action --app <app> --element-index <i> --action 
 ```
 
 Prefer semantic actions (`click`, `set-value`, `perform-secondary-action`) over raw `type-text` or `press-key` — they target accessibility elements directly and survive focus changes that keyboard input doesn't.
+
+`type-text --element-index <i>` inserts the text at that field's caret without focusing it or bringing its window forward. It works on macOS and Linux; on Windows, click the field and run `type-text` without the index.
 
 On macOS, actions run in the background: the target app isn't brought forward, your frontmost app and key window stay put, and the pointer doesn't move, so you can keep working while an agent drives another window. Each action result reports `action.delivery` (`background` or `foreground`). Pass `--restore-window` only when an app ignores background input, such as drags in Chromium or Electron apps or games; it brings the app forward and uses the real pointer and keyboard. Popup menus and web `<select>` controls are set with `set-value` instead of a click. On Linux and Windows, clicks, scrolling, drags and keyboard input still bring the window forward.
 

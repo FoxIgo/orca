@@ -143,6 +143,47 @@ describe('orca computer action CLI validation', () => {
     expect(process.exitCode).toBeUndefined()
   })
 
+  it('refuses element-targeted type-text on a runtime that does not report it', async () => {
+    queueFixtures(
+      callMock,
+      okFixture('req_capabilities', {
+        platform: 'win32',
+        provider: 'orca-computer-use-windows',
+        providerVersion: '1.0.0',
+        protocolVersion: 1,
+        supports: { actions: { typeText: true, setValue: true } }
+      })
+    )
+
+    await main(
+      [
+        'computer',
+        'type-text',
+        '--session',
+        'manual',
+        '--app',
+        'Notepad',
+        '--element-index',
+        '3',
+        '--text',
+        'hello',
+        '--json'
+      ],
+      '/tmp/repo/src'
+    )
+
+    expect(callMock).toHaveBeenCalledTimes(1)
+    expect(callMock).toHaveBeenCalledWith('computer.capabilities', {})
+    const output = JSON.parse(vi.mocked(console.log).mock.calls[0][0])
+    expect(output.error).toMatchObject({
+      code: 'unsupported_capability',
+      message: expect.stringContaining(
+        'orca-computer-use-windows cannot type into a specific element'
+      )
+    })
+    expect(process.exitCode).toBe(1)
+  })
+
   it('rejects conflicting get-app-state window target flags before calling the runtime', async () => {
     await main(
       [
