@@ -580,12 +580,20 @@ function Render-OrcaTree($RootElement, $WindowFrame, [bool]$CompactBrowserTabs =
     # Tab compaction shrinks records mid-walk, so $records.Count would reuse retained indexes.
     $nextIndex = [ref]0
 
-    function Visit-OrcaNode($Node, [int]$Depth) {
-        if ($records.Count -ge $MaxNodes -or $Depth -gt $MaxDepth) {
-            $truncation.truncated = $true
-            if ($Depth -gt $MaxDepth) { $truncation.maxDepthReached = $true }
-            return
+    function Visit-OrcaChildren($Children, [int]$Depth) {
+        for ($i = 0; $i -lt $Children.Count; $i++) {
+            if ($records.Count -ge $MaxNodes -or $Depth -gt $MaxDepth) {
+                $truncation.truncated = $true
+                if ($Depth -gt $MaxDepth) { $truncation.maxDepthReached = $true }
+                # Marks where the walk stopped, so the agent can read that parent's subtree by index.
+                $lines.Add(("`t" * $Depth) + "... $($Children.Count - $i) more not shown (snapshot limit)")
+                return
+            }
+            Visit-OrcaNode $Children.Item($i) $Depth
         }
+    }
+
+    function Visit-OrcaNode($Node, [int]$Depth) {
         $identity = try { (@($Node.GetRuntimeId()) -join ".") } catch { [Guid]::NewGuid().ToString() }
         if (-not $seen.Add($identity)) { return }
 
@@ -606,9 +614,7 @@ function Render-OrcaTree($RootElement, $WindowFrame, [bool]$CompactBrowserTabs =
             }
         }
         if (($roleKey -in @("pane", "group", "custom", "unknown")) -and [string]::IsNullOrWhiteSpace($title) -and [string]::IsNullOrWhiteSpace($record.value) -and $meaningfulActions.Count -eq 0 -and $null -eq $genericSummary -and $children.Count -le 1) {
-            for ($i = 0; $i -lt $children.Count; $i++) {
-                Visit-OrcaNode $children.Item($i) $Depth
-            }
+            Visit-OrcaChildren $children $Depth
             return
         }
 
@@ -632,9 +638,7 @@ function Render-OrcaTree($RootElement, $WindowFrame, [bool]$CompactBrowserTabs =
 
         if (-not [string]::IsNullOrWhiteSpace($genericSummary) -or (Test-OrcaSuppressChildren $roleKey $title $record.value $genericSummary)) { return }
         $childLineStart = $lines.Count
-        for ($i = 0; $i -lt $children.Count; $i++) {
-            Visit-OrcaNode $children.Item($i) ($Depth + 1)
-        }
+        Visit-OrcaChildren $children ($Depth + 1)
         if ($CompactBrowserTabs) {
             Compress-OrcaRenderedBrowserTabs $records $lines $childLineStart ($Depth + 1)
         }
@@ -806,13 +810,20 @@ function Get-OrcaScreenshot([bool]$IncludeScreenshot, $WindowFrame) {
     }
 }
 
-function New-OrcaSnapshot([string]$Query, [bool]$IncludeScreenshot, $WindowId = $null, $WindowIndex = $null, [bool]$RestoreWindow = $false) {
+function New-OrcaSnapshot([string]$Query, [bool]$IncludeScreenshot, $WindowId = $null, $WindowIndex = $null, [bool]$RestoreWindow = $false, $TreeRoot = $null) {
     $process = Find-OrcaProcess $Query
     if ($RestoreWindow) { Restore-OrcaWindow $process }
     Assert-OrcaWindowTarget $process $WindowId $WindowIndex
     $root = Get-OrcaRootElement $process
     $windowFrame = Get-OrcaWindowFrame $process $root
-    $tree = Render-OrcaTree $root $windowFrame (Test-OrcaBrowserProcess $process)
+    $walkRoot = $root
+    if ($null -ne $TreeRoot) {
+        $walkRoot = Find-OrcaElement $root $TreeRoot
+        if ($null -eq $walkRoot) {
+            throw "stale element: element $($TreeRoot.index) is gone; run get-app-state again and use a fresh element index"
+        }
+    }
+    $tree = Render-OrcaTree $walkRoot $windowFrame (Test-OrcaBrowserProcess $process)
     $screenshot = Get-OrcaScreenshot $IncludeScreenshot $windowFrame
 
     [pscustomobject]@{
@@ -1232,7 +1243,7 @@ function Invoke-OrcaOperation($Operation) {
         return [pscustomobject]@{ ok = $true; app = $list.app; windows = @($list.windows) }
     }
     if ($Operation.tool -eq "get_app_state") {
-        return [pscustomobject]@{ ok = $true; snapshot = New-OrcaSnapshot $Operation.app $includeScreenshot $Operation.windowId $Operation.windowIndex ([bool]$Operation.restoreWindow) }
+        return [pscustomobject]@{ ok = $true; snapshot = New-OrcaSnapshot $Operation.app $includeScreenshot $Operation.windowId $Operation.windowIndex ([bool]$Operation.restoreWindow) $Operation.root }
     }
 
     $process = Find-OrcaProcess $Operation.app
