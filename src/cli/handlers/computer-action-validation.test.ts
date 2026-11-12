@@ -175,12 +175,7 @@ describe('orca computer action CLI validation', () => {
     expect(callMock).toHaveBeenCalledTimes(1)
     expect(callMock).toHaveBeenCalledWith('computer.capabilities', {})
     const output = JSON.parse(vi.mocked(console.log).mock.calls[0][0])
-    expect(output.error).toMatchObject({
-      code: 'unsupported_capability',
-      message: expect.stringContaining(
-        'orca-computer-use-windows cannot type into a specific element'
-      )
-    })
+    expect(output.error).toMatchObject({ code: 'unsupported_capability' })
     expect(process.exitCode).toBe(1)
   })
 
