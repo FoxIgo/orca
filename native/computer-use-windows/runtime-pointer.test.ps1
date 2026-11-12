@@ -46,6 +46,10 @@ public static class OrcaDesktopWin32 {
         }
         return Foreground;
     }
+    public static uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId) {
+        processId = hwnd == new IntPtr(101) ? 4242u : 1u;
+        return 1;
+    }
     public static bool SetCursorPos(int x, int y) {
         Calls.Add("move:" + x + "," + y);
         return true;
@@ -68,14 +72,15 @@ $functions = @(
     "Assert-OrcaPointerFocus", "Restore-OrcaWindow", "Restore-OrcaPointerWindow", "Assert-OrcaWindowTarget",
     "Get-OrcaRequiredNumber", "Get-OrcaPositiveInteger", "Get-OrcaPositiveNumber",
     "Get-OrcaScreenPoint", "Get-OrcaElementScreenPoint", "Get-OrcaModifierVirtualKey",
-    "Get-OrcaClickModifierVirtualKeys", "Send-OrcaMouseClick", "Send-OrcaDrag", "Invoke-OrcaOperation"
+    "Get-OrcaClickModifierVirtualKeys", "Send-OrcaMouseClick", "Send-OrcaDrag", "Invoke-OrcaOperation",
+    "Test-OrcaTargetTookForeground"
 )
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)) {
     if ($definition.Name -in $functions) { . ([scriptblock]::Create($definition.Extent.Text)) }
 }
 
 $MouseEvents = @{ LeftDown = 2; LeftUp = 4; RightDown = 8; RightUp = 16; MiddleDown = 32; MiddleUp = 64; Wheel = 2048; HorizontalWheel = 4096 }
-function Find-OrcaProcess { [pscustomobject]@{ MainWindowHandle = 101 } }
+function Find-OrcaProcess { [pscustomobject]@{ Id = 4242; MainWindowHandle = 101 } }
 function Get-OrcaRootElement { $null }
 function Get-OrcaWindowFrame { @{ x = [OrcaDesktopWin32]::WindowX; y = 200 } }
 function Find-OrcaElement($RootElement, $Record) { $Record }
@@ -126,4 +131,10 @@ foreach ($case in @(
     Assert-TestEqual $result.action.delivery "background" "pattern $($case.tool) delivery"
     Assert-TestEqual ([OrcaDesktopWin32]::Calls.Count) 0 "pattern $($case.tool) bypasses activation and global input"
 }
+# Why: WPF activates its own window for most patterns; the result must say so rather than claim background.
+[OrcaDesktopWin32]::Reset($false)
+function Invoke-OrcaPrimaryAction($Element) { [OrcaDesktopWin32]::Foreground = [IntPtr]101; $true }
+$result = Invoke-OrcaOperation ([pscustomobject]@{ tool = "click"; app = "Fixture"; element = [pscustomobject]@{ index = 1 } })
+Assert-TestEqual $result.action.path "accessibility" "self-activating pattern click path"
+Assert-TestEqual $result.action.delivery "foreground" "self-activating pattern click delivery"
 Write-Output "windows-pointer-tests-ok"
